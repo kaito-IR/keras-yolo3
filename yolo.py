@@ -17,15 +17,59 @@ from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
 import os
 from keras.utils import multi_gpu_model
+import pyrealsense2 as rs
+
+os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
+
+x =list()
+y = list()
+class RealsenseCapture:
+
+    def __init__(self):
+        self.WIDTH = 640
+        self.HEGIHT = 480
+        self.FPS = 30
+        # Configure depth and color streams
+        self.config = rs.config()
+        self.config.enable_stream(rs.stream.color, self.WIDTH, self.HEGIHT, rs.format.bgr8, self.FPS)
+        self.config.enable_stream(rs.stream.depth, self.WIDTH, self.HEGIHT, rs.format.z16, self.FPS)
+
+    def start(self):
+        # Start streaming
+        self.pipeline = rs.pipeline()
+        self.pipeline.start(self.config)
+        print('pipline start')
+
+    def read(self, is_array=True):
+        # Flag capture available
+        ret = True
+        # get frames
+        frames = self.pipeline.wait_for_frames()
+        # separate RGB and Depth image
+        self.color_frame = frames.get_color_frame()  # RGB
+        self.depth_frame = frames.get_depth_frame()  # Depth
+
+        if not self.color_frame or not self.depth_frame:
+            ret = False
+            return ret, (None, None)
+        elif is_array:
+            # Convert images to numpy arrays
+            return ret, (self.color_frame, self.depth_frame)#return ret, (color_image, depth_image)
+        else:
+            return ret, (self.color_frame, self.depth_frame)
+
+    def release(self):
+        # Stop streaming
+        self.pipeline.stop()
 
 class YOLO(object):
     _defaults = {
         "model_path": 'model_data/yolo.h5',
-        "anchors_path": 'model_data/yolo_anchors.txt',
+        "anchors_path": 'model_data/tiny_yolo_anchors.txt',
         "classes_path": 'model_data/coco_classes.txt',
         "score" : 0.3,
         "iou" : 0.45,
-        "model_image_size" : (416, 416),
+        "model_image_size" : (640, 480),
         "gpu_num" : 1,
     }
 
@@ -129,12 +173,10 @@ class YOLO(object):
         font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
                     size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
-
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
             box = out_boxes[i]
             score = out_scores[i]
-
             label = '{} {:.2f}'.format(predicted_class, score)
             draw = ImageDraw.Draw(image)
             label_size = draw.textsize(label, font)
@@ -144,8 +186,13 @@ class YOLO(object):
             left = max(0, np.floor(left + 0.5).astype('int32'))
             bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
             right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            print(label, (left, top), (right, bottom))
-
+            temp = (left+right)/2
+            temp = temp.astype(np.int32)
+            x.append(temp)
+            temp = (top+bottom)/2
+            temp = temp.astype(np.int32)
+            y.append(temp)
+            print(label)#label内に識別結果(何が読み取れたかとどれくらい似ているか)が格納
             if top - label_size[1] >= 0:
                 text_origin = np.array([left, top - label_size[1]])
             else:
@@ -169,28 +216,37 @@ class YOLO(object):
     def close_session(self):
         self.sess.close()
 
-def detect_video(yolo, video_path, output_path=""):
+def detect_video(yolo): #def detect_video(yolo, video_path, output_path=""):
     import cv2
-    vid = cv2.VideoCapture(video_path)
-    if not vid.isOpened():
-        raise IOError("Couldn't open webcam or video")
-    video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
-    video_fps       = vid.get(cv2.CAP_PROP_FPS)
-    video_size      = (int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                        int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    isOutput = True if output_path != "" else False
-    if isOutput:
-        print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
-        out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
+    vid = RealsenseCapture() #cv2.VideoCapture(video_path)
+    vid.start()
+    #if not vid.isOpened():
+    #    raise IOError("Couldn't open webcam or video")
+    video_FourCC    = cv2.VideoWriter_fourcc(*'XVID')#int(vid.get(cv2.CAP_PROP_FOURCC))
+    video_fps       = vid.FPS #vid.get(cv2.CAP_PROP_FPS)
+    video_size      = (int(vid.WIDTH),int(vid.HEGIHT)) #(int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        #int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     accum_time = 0
     curr_fps = 0
     fps = "FPS: ??"
     prev_time = timer()
     while True:
         return_value, frame = vid.read()
-        image = Image.fromarray(frame)
+        color_image = np.array(frame[0].get_data())
+        depth_image = np.array(frame[1].get_data())
+        image = Image.fromarray(color_image)
         image = yolo.detect_image(image)
         result = np.asarray(image)
+        depth_frame = frame[1]
+        length = len(x)
+        for d in range(length):
+            dist = depth_frame.get_distance(x[d],y[d])
+            print("dist:{}",format(dist))
+        x.clear()
+        y.clear()
+        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(
+            depth_image, alpha=0.08), cv2.COLORMAP_JET)
+        images = np.hstack((result, depth_colormap))  # RGBとDepthを横に並べて表示
         curr_time = timer()
         exec_time = curr_time - prev_time
         prev_time = curr_time
@@ -203,10 +259,9 @@ def detect_video(yolo, video_path, output_path=""):
         cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                     fontScale=0.50, color=(255, 0, 0), thickness=2)
         cv2.namedWindow("result", cv2.WINDOW_NORMAL)
-        cv2.imshow("result", result)
-        if isOutput:
-            out.write(result)
+        cv2.imshow("result", images)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
     yolo.close_session()
+    vid.release()
 
