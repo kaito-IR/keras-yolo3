@@ -144,7 +144,6 @@ class YOLO(object):
         return boxes, scores, classes
 
     def detect_image(self, image):
-        start = timer()
 
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
@@ -190,7 +189,10 @@ class YOLO(object):
             temp = temp.astype(np.int32)
             x.append(temp)
             temp = (top+bottom)/2
-            temp = temp.astype(np.int32)
+            if type(temp) is np.float64:
+                temp = temp.astype(np.int32)
+            elif type(temp) is float:
+                temp = int(temp)
             y.append(temp)
             print(label)#label内に識別結果(何が読み取れたかとどれくらい似ているか)が格納
             if top - label_size[1] >= 0:
@@ -209,8 +211,6 @@ class YOLO(object):
             draw.text(text_origin, label, fill=(0, 0, 0), font=font)
             del draw
 
-        end = timer()
-        print(end - start)
         return image
 
     def close_session(self):
@@ -220,16 +220,6 @@ def detect_video(yolo): #def detect_video(yolo, video_path, output_path=""):
     import cv2
     vid = RealsenseCapture() #cv2.VideoCapture(video_path)
     vid.start()
-    #if not vid.isOpened():
-    #    raise IOError("Couldn't open webcam or video")
-    video_FourCC    = cv2.VideoWriter_fourcc(*'XVID')#int(vid.get(cv2.CAP_PROP_FOURCC))
-    video_fps       = vid.FPS #vid.get(cv2.CAP_PROP_FPS)
-    video_size      = (int(vid.WIDTH),int(vid.HEGIHT)) #(int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                        #int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    accum_time = 0
-    curr_fps = 0
-    fps = "FPS: ??"
-    prev_time = timer()
     while True:
         return_value, frame = vid.read()
         color_image = np.array(frame[0].get_data())
@@ -241,23 +231,12 @@ def detect_video(yolo): #def detect_video(yolo, video_path, output_path=""):
         length = len(x)
         for d in range(length):
             dist = depth_frame.get_distance(x[d],y[d])
-            print("dist:{}",format(dist))
+            print("dist:{}".format(dist))
         x.clear()
         y.clear()
         depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(
             depth_image, alpha=0.08), cv2.COLORMAP_JET)
         images = np.hstack((result, depth_colormap))  # RGBとDepthを横に並べて表示
-        curr_time = timer()
-        exec_time = curr_time - prev_time
-        prev_time = curr_time
-        accum_time = accum_time + exec_time
-        curr_fps = curr_fps + 1
-        if accum_time > 1:
-            accum_time = accum_time - 1
-            fps = "FPS: " + str(curr_fps)
-            curr_fps = 0
-        cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=0.50, color=(255, 0, 0), thickness=2)
         cv2.namedWindow("result", cv2.WINDOW_NORMAL)
         cv2.imshow("result", images)
         if cv2.waitKey(1) & 0xFF == ord('q'):
