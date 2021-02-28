@@ -15,9 +15,11 @@ from PIL import Image, ImageFont, ImageDraw
 
 from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
-import os
 from keras.utils import multi_gpu_model
 import pyrealsense2 as rs
+from numba import jit
+from functools import lru_cache
+
 
 os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
 
@@ -143,6 +145,7 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
+    #@jit
     def detect_image(self, image):
 
         if self.model_image_size != (None, None):
@@ -167,7 +170,7 @@ class YOLO(object):
                 K.learning_phase(): 0
             })
 
-        print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
+        #print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
 
         font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
                     size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
@@ -194,7 +197,7 @@ class YOLO(object):
             elif type(temp) is float:
                 temp = int(temp)
             y.append(temp)
-            print(label)#label内に識別結果(何が読み取れたかとどれくらい似ているか)が格納
+            #print(label)#label内に識別結果(何が読み取れたかとどれくらい似ているか)が格納
             if top - label_size[1] >= 0:
                 text_origin = np.array([left, top - label_size[1]])
             else:
@@ -216,10 +219,10 @@ class YOLO(object):
     def close_session(self):
         self.sess.close()
 
-def detect_video(yolo): #def detect_video(yolo, video_path, output_path=""):
+
+def detect_video(yolo): 
     import cv2
-    vid = RealsenseCapture() #cv2.VideoCapture(video_path)
-    vid.start()
+    vid = RealsenseCapture() 
     while True:
         return_value, frame = vid.read()
         color_image = np.array(frame[0].get_data())
